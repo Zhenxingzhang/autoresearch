@@ -4,6 +4,8 @@
 
 name: autoresearch-train
 
+setup_command: bash setup_claude.sh
+
 command: |
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
@@ -18,21 +20,19 @@ resources:
   task_type: 1gpu
   cluster:
     - AWS_ALL
-  docker_image: docker.apple.com/bolt/pytorch:2.9.1-cuda12.8
+  docker_image: docker.apple.com/bolt/cuda:12.6.1-ubuntu22.04-efa1.29.1-cudnn-devel
   memory_gb: 64.0
   num_cpus: 16
   disk_gb: 100.0
-  timeout: 2h
+  timeout: 7D
   # TODO: Update group to your team's group
   group: ai:siri
 
 environment_variables:
   CUDA_VISIBLE_DEVICES: "0"
-
-# TODO: Update to your project and permissions
-project_id: fm_siri_data
-permissions:
-  owners: linwood-approved
+  CKPT_DIR: "${BOLT_ARTIFACT_DIR}/checkpoints"
+  PATH: "/var/bolt_python/include/python3.10"
+  HF_HUB_OFFLINE: "1"
 
 tags:
   - autoresearch

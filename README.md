@@ -80,6 +80,28 @@ Seeing as there seems to be a lot of interest in tinkering with autoresearch on 
 
 I think these would be the reasonable hyperparameters to play with. Ask your favorite coding agent for help and copy paste them this guide, as well as the full source code.
 
+## Inference on Mac
+
+You can run `generate.py` on a MacBook Pro (Apple Silicon or Intel) to sample from a trained checkpoint. Since `pyproject.toml` pins the CUDA PyTorch wheel, install dependencies separately:
+
+```bash
+# Install PyTorch (CPU/MPS) — no CUDA needed
+pip install torch torchvision
+
+# Install the tokenizer dependencies
+pip install tiktoken rustbpe
+
+# Run generation (set CKPT_DIR to where your model.pt lives)
+CKPT_DIR=/path/to/checkpoints python generate.py --prompt "Once upon a time"
+
+# Options
+python generate.py --prompt "Hello world" --max_new_tokens 300 --temperature 0.6 --top_k 40 --device cpu
+```
+
+On Apple Silicon Macs the script auto-detects the MPS backend. You can also force `--device cpu` if needed. The model is small enough that CPU inference works fine.
+
+**Note:** You need a `model.pt` checkpoint produced by `train.py` (which requires an NVIDIA GPU). Copy it from your training machine, e.g. from `~/.cache/autoresearch/checkpoints/model.pt`.
+
 ## Notable forks
 
 - [miolini/autoresearch-macos](https://github.com/miolini/autoresearch-macos) (MacOS)

@@ -607,6 +607,17 @@ print()  # newline after \r training log
 
 total_tokens = step * TOTAL_BATCH_SIZE
 
+# Save checkpoint and tokenizer
+import shutil
+ckpt_dir = os.environ.get("CKPT_DIR", os.path.join(os.path.expanduser("~"), ".cache", "autoresearch", "checkpoints"))
+os.makedirs(ckpt_dir, exist_ok=True)
+ckpt_path = os.path.join(ckpt_dir, "model.pt")
+torch.save({"model": model.state_dict(), "config": asdict(config)}, ckpt_path)
+tokenizer_src = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch", "tokenizer", "tokenizer.pkl")
+tokenizer_dst = os.path.join(ckpt_dir, "tokenizer.pkl")
+shutil.copy2(tokenizer_src, tokenizer_dst)
+print(f"Checkpoint saved to {ckpt_dir}")
+
 # Final eval
 model.eval()
 with autocast_ctx:
