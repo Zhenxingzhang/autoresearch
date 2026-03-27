@@ -1,0 +1,40 @@
+# Bolt config for autoresearch - GPT training with GPU
+# Submit with: bolt task submit --config bolt.yaml [--interactive]
+# Docs: https://docs.bolt.apple.com/reference/api-cli.html
+
+name: autoresearch-train
+
+command: |
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  uv sync
+  uv run prepare.py
+  uv run train.py
+
+resources:
+  # TODO: Update task_type to a GPU type available in your project.
+  # Common GPU task types: 1gpu, 2gpu, 4gpu, 8gpu, 1h100, etc.
+  # Check with: bolt quota show --project-id <your_project_id>
+  task_type: 1gpu
+  cluster:
+    - AWS_ALL
+  docker_image: docker.apple.com/bolt/pytorch:2.9.1-cuda12.8
+  memory_gb: 64.0
+  num_cpus: 16
+  disk_gb: 100.0
+  timeout: 2h
+  # TODO: Update group to your team's group
+  group: ai:siri
+
+environment_variables:
+  CUDA_VISIBLE_DEVICES: "0"
+
+# TODO: Update to your project and permissions
+project_id: fm_siri_data
+permissions:
+  owners: linwood-approved
+
+tags:
+  - autoresearch
+
+expires_in: 7d
