@@ -1,3 +1,8 @@
+Submit a training job to Bolt (excludes `.venv` and `checkpoints` from the upload):
+```bash
+bolt task submit --config bolt.yaml --interactive --tar . --exclude .venv checkpoints
+```
+
 # autoresearch
 
 ![teaser](progress.png)
