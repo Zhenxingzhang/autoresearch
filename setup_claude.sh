@@ -13,3 +13,5 @@ curl https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 nvm install 22
 nvm use 22
 npm install -g @apple/claude-code --registry https://npm.apple.com
+
+ln -s /miniforge/include/python3.10 /usr/include/python3.10

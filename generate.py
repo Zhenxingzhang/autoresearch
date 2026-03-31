@@ -215,25 +215,59 @@ def evaluate_bpb(model, tokenizer, text, device="cpu"):
 
 
 @torch.no_grad()
-def generate(model, tokenizer, prompt, max_new_tokens=200, temperature=0.8, top_k=50, device="cpu"):
+def generate(model, tokenizer, prompt, max_new_tokens=200, temperature=0.8,
+             top_k=50, top_p=0.95, repetition_penalty=1.2, frequency_penalty=0.0,
+             device="cpu"):
     model.eval()
     token_ids = tokenizer.encode(prompt)
     tokens = [tokenizer.get_bos_token_id()] + token_ids
     x = torch.tensor([tokens], dtype=torch.long, device=device)
     seq_len = model.config.sequence_len
+    token_counts = torch.zeros(model.config.vocab_size, dtype=torch.long, device=device)
+    for t in tokens:
+        token_counts[t] += 1
 
     for _ in range(max_new_tokens):
         # Crop to sequence length if needed
         x_cond = x if x.size(1) <= seq_len else x[:, -seq_len:]
         logits = model(x_cond)
-        logits = logits[:, -1, :] / temperature
+        logits = logits[:, -1, :]
+
+        # Repetition penalty: penalize tokens that appeared in the sequence
+        if repetition_penalty != 1.0:
+            generated_tokens = x[0].unique()
+            penalty_logits = logits[0, generated_tokens]
+            # Shrink positive logits, magnify negative logits
+            logits[0, generated_tokens] = torch.where(
+                penalty_logits > 0,
+                penalty_logits / repetition_penalty,
+                penalty_logits * repetition_penalty,
+            )
+
+        # Frequency penalty: scale by how often each token was used
+        if frequency_penalty > 0.0:
+            logits[0] -= frequency_penalty * token_counts.float()
+
+        logits = logits / temperature
+
         # Top-k filtering
         if top_k > 0:
             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
             logits[logits < v[:, [-1]]] = -float("inf")
+
+        # Top-p (nucleus) filtering
+        if top_p < 1.0:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+            # Remove tokens with cumulative probability above the threshold
+            sorted_mask = cumulative_probs - F.softmax(sorted_logits, dim=-1) >= top_p
+            sorted_logits[sorted_mask] = -float("inf")
+            logits = sorted_logits.scatter(1, sorted_indices, sorted_logits)
+
         probs = F.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, num_samples=1)
         x = torch.cat([x, next_token], dim=1)
+        token_counts[next_token.item()] += 1
 
     output_ids = x[0].tolist()
     # Skip the prepended BOS token
@@ -246,6 +280,9 @@ def main():
     parser.add_argument("--max_new_tokens", type=int, default=200, help="Number of tokens to generate")
     parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature")
     parser.add_argument("--top_k", type=int, default=50, help="Top-k filtering (0 to disable)")
+    parser.add_argument("--top_p", type=float, default=0.95, help="Top-p nucleus filtering (1.0 to disable)")
+    parser.add_argument("--repetition_penalty", type=float, default=1.2, help="Repetition penalty (1.0 to disable)")
+    parser.add_argument("--frequency_penalty", type=float, default=0.0, help="Frequency penalty (0.0 to disable)")
     parser.add_argument("--device", type=str, default=None, help="Device (default: cuda if available)")
     parser.add_argument("--random_weights", action="store_true", help="Use randomly initialized weights instead of loading a checkpoint")
     parser.add_argument("--eval", type=str, default=None, metavar="TEXT", help="Compute BPB on the given text instead of generating")
@@ -297,7 +334,9 @@ def main():
     else:
         print(f"Prompt: {args.prompt}")
         print("---")
-        output = generate(model, tokenizer, args.prompt, args.max_new_tokens, args.temperature, args.top_k, device)
+        output = generate(model, tokenizer, args.prompt, args.max_new_tokens,
+                          args.temperature, args.top_k, args.top_p,
+                          args.repetition_penalty, args.frequency_penalty, device)
         print(output)
 
 

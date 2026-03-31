@@ -19,22 +19,25 @@ resources:
   # Check with: bolt quota show --project-id <your_project_id>
   task_type: 1gpu
   cluster:
-    - AWS_ALL
+    - aws_4
+    - gcp_4
   docker_image: docker.apple.com/bolt/cuda:12.6.1-ubuntu22.04-efa1.29.1-cudnn-devel
   memory_gb: 64.0
   num_cpus: 16
   disk_gb: 100.0
   timeout: 7D
-  # TODO: Update group to your team's group
-  group: ai:siri
 
 environment_variables:
   CUDA_VISIBLE_DEVICES: "0"
   CKPT_DIR: "${BOLT_ARTIFACT_DIR}/checkpoints"
-  PATH: "/var/bolt_python/include/python3.10"
-  HF_HUB_OFFLINE: "1"
+  PATH: "/var/bolt_python/include/python3.10:$PATH"
+  HF_TOKEN: "REDACTED"
 
 tags:
   - autoresearch
+
+attribution:
+  mldb_token: mldb-znylp4pal3
+project_id: lw_project
 
 expires_in: 7d
