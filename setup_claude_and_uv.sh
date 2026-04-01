@@ -15,3 +15,7 @@ nvm use 22
 npm install -g @apple/claude-code --registry https://npm.apple.com
 
 ln -s /miniforge/include/python3.10 /usr/include/python3.10
+
+
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"

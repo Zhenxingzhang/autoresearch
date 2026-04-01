@@ -4,11 +4,9 @@
 
 name: autoresearch-train
 
-setup_command: bash setup_claude.sh
+setup_command: bash setup_claude_and_uv.sh
 
 command: |
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
   uv sync
   uv run prepare.py
   uv run train.py
