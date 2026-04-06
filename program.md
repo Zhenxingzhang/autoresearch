@@ -31,7 +31,7 @@ Each experiment runs on a single GPU. The training script runs for a **fixed tim
 - Install new packages or add dependencies. You can only use what's already in `pyproject.toml`.
 - Modify the evaluation harness. The `evaluate_bpb` function in `prepare.py` is the ground truth metric.
 
-**The goal is simple: get the lowest val_bpb.** Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size. The only constraint is that the code runs without crashing and finishes within the time budget.
+**The goal is simple: get the lowest fitness score.** Fitness is a composite metric: `fitness = 0.5 * val_bpb + 0.5 * ood_bpb` (where ood_bpb is WikiText-2 BPB). This prevents overfitting to the in-distribution validation set. Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size. The only constraint is that the code runs without crashing and finishes within the time budget.
 
 **VRAM** is a soft constraint. Some increase is acceptable for meaningful val_bpb gains, but it should not blow up dramatically.
 
@@ -78,7 +78,9 @@ Template for the initial scratchpad:
 # Research Scratchpad
 
 ## Current best
+- fitness: (filled after baseline)
 - val_bpb: (filled after baseline)
+- ood_bpb: (filled after baseline)
 - commit: (filled after baseline)
 - key config: depth=8, aspect_ratio=64, matrix_lr=0.04
 
@@ -110,7 +112,7 @@ These are optional starting points drawn from recent ML research and the nanocha
 **Architecture ideas:**
 - SwiGLU / GeGLU activations (replace ReLU² in the MLP) — widely used in modern LLMs.
 - Grouped query attention: try n_kv_head < n_head (e.g., 2 KV heads instead of 4) to save compute and reinvest in model size.
-- The sliding window pattern "SSSL" is one option — try "LLLL" (all full attention) or "SSLL" or others.
+- The sliding window pattern "SSSL" is one option — try "LLLL" (all full attention) or "SSLL" or others. **Constraint: the pattern must contain at least one "L" (global attention layer).** Patterns like "SSSS" with no global attention degrade long-range modeling.
 
 **Optimizer:**
 - The Muon optimizer is relatively new. Its momentum schedule, NS steps, and interaction with weight decay may not be optimal.
@@ -126,7 +128,9 @@ Once the script finishes it prints a summary like this:
 
 ```
 ---
-val_bpb:          0.997900
+fitness:          0.997900
+val_bpb:          0.985000
+ood_bpb:          1.010800
 training_seconds: 300.1
 total_seconds:    325.9
 peak_vram_mb:     45060.2
@@ -140,7 +144,7 @@ depth:            8
 Note that the script is configured to always stop after 5 minutes, so depending on the computing platform of this computer the numbers might look different. You can extract the key metric from the log file:
 
 ```
-grep "^val_bpb:" run.log
+grep "^fitness:" run.log
 ```
 
 ## Logging results
@@ -150,11 +154,11 @@ When an experiment is done, log it to `results.tsv` (tab-separated, NOT comma-se
 The TSV has a header row and 5 columns:
 
 ```
-commit	val_bpb	memory_gb	status	description
+commit	fitness	memory_gb	status	description
 ```
 
 1. git commit hash (short, 7 chars)
-2. val_bpb achieved (e.g. 1.234567) — use 0.000000 for crashes
+2. fitness score achieved (e.g. 1.234567) — use 0.000000 for crashes
 3. peak memory in GB, round to .1f (e.g. 12.3 — divide peak_vram_mb by 1024) — use 0.0 for crashes
 4. status: `keep`, `discard`, or `crash`
 5. short text description of what this experiment tried
@@ -162,7 +166,7 @@ commit	val_bpb	memory_gb	status	description
 Example:
 
 ```
-commit	val_bpb	memory_gb	status	description
+commit	fitness	memory_gb	status	description
 a1b2c3d	0.997900	44.0	keep	baseline
 b2c3d4e	0.993200	44.2	keep	increase LR to 0.04
 c3d4e5f	1.005000	44.0	discard	switch to GeLU activation
@@ -180,12 +184,12 @@ LOOP FOREVER:
 2. Tune `train.py` with the experimental idea by directly hacking the code.
 3. git commit
 4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-5. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
+5. Read out the results: `grep "^fitness:\|^val_bpb:\|^ood_bpb:\|^peak_vram_mb:" run.log`
 6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
 7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
 8. **Update scratchpad.md**: Record what you learned. Update the ideas queue. Move dead ends. Update "Current best" if applicable.
-9. If val_bpb improved (lower), you "advance" the branch, keeping the git commit
-10. If val_bpb is equal or worse, you git reset back to where you started
+9. If fitness improved (lower), you "advance" the branch, keeping the git commit
+10. If fitness is equal or worse, you git reset back to where you started
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
 

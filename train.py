@@ -11,7 +11,7 @@ os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import gc
 import math
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 
 import torch
 import torch.nn as nn
@@ -23,39 +23,12 @@ cap = torch.cuda.get_device_capability()
 repo = "varunneal/flash-attention-3" if cap == (9, 0) else "kernels-community/flash-attn3"
 fa3 = get_kernel(repo).flash_attn_interface
 
-from prepare import MAX_SEQ_LEN, TIME_BUDGET, Tokenizer, make_dataloader, evaluate_bpb
+from model import GPTConfig, Tokenizer, norm, has_ve, apply_rotary_emb, MLP
+from prepare import MAX_SEQ_LEN, TIME_BUDGET, make_dataloader, evaluate_bpb
 
 # ---------------------------------------------------------------------------
-# GPT Model
+# GPT Model (FA3 training variant — keeps CausalSelfAttention, Block, GPT)
 # ---------------------------------------------------------------------------
-
-@dataclass
-class GPTConfig:
-    sequence_len: int = 2048
-    vocab_size: int = 32768
-    n_layer: int = 12
-    n_head: int = 6
-    n_kv_head: int = 6
-    n_embd: int = 768
-    window_pattern: str = "SSSL"
-
-
-def norm(x):
-    return F.rms_norm(x, (x.size(-1),))
-
-
-def has_ve(layer_idx, n_layer):
-    """Returns True if layer should have Value Embedding (alternating, last always included)."""
-    return layer_idx % 2 == (n_layer - 1) % 2
-
-
-def apply_rotary_emb(x, cos, sin):
-    assert x.ndim == 4
-    d = x.shape[3] // 2
-    x1, x2 = x[..., :d], x[..., d:]
-    y1 = x1 * cos + x2 * sin
-    y2 = x1 * (-sin) + x2 * cos
-    return torch.cat([y1, y2], 3)
 
 
 class CausalSelfAttention(nn.Module):
@@ -71,6 +44,7 @@ class CausalSelfAttention(nn.Module):
         self.c_k = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
         self.c_v = nn.Linear(self.n_embd, self.n_kv_head * self.head_dim, bias=False)
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        self.resid_dropout = nn.Dropout(config.dropout)
         self.ve_gate_channels = 32
         self.ve_gate = nn.Linear(self.ve_gate_channels, self.n_kv_head, bias=False) if has_ve(layer_idx, config.n_layer) else None
 
@@ -93,20 +67,8 @@ class CausalSelfAttention(nn.Module):
         y = fa3.flash_attn_func(q, k, v, causal=True, window_size=window_size)
         y = y.contiguous().view(B, T, -1)
         y = self.c_proj(y)
+        y = self.resid_dropout(y)
         return y
-
-
-class MLP(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=False)
-
-    def forward(self, x):
-        x = self.c_fc(x)
-        x = F.relu(x).square()
-        x = self.c_proj(x)
-        return x
 
 
 class Block(nn.Module):
@@ -114,10 +76,11 @@ class Block(nn.Module):
         super().__init__()
         self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp = MLP(config)
+        self.resid_dropout = nn.Dropout(config.dropout)
 
     def forward(self, x, ve, cos_sin, window_size):
         x = x + self.attn(norm(x), ve, cos_sin, window_size)
-        x = x + self.mlp(norm(x))
+        x = x + self.resid_dropout(self.mlp(norm(x)))
         return x
 
 
@@ -433,6 +396,7 @@ class MuonAdamW(torch.optim.Optimizer):
 ASPECT_RATIO = 64       # model_dim = depth * ASPECT_RATIO
 HEAD_DIM = 128          # target head dimension for attention
 WINDOW_PATTERN = "SSSL" # sliding window pattern: L=full, S=half context
+DROPOUT = 0.0           # dropout rate (0.0 = no dropout)
 
 # Optimization
 TOTAL_BATCH_SIZE = 2**19 # ~524K tokens per optimizer step
@@ -473,7 +437,7 @@ def build_model_config(depth):
     return GPTConfig(
         sequence_len=MAX_SEQ_LEN, vocab_size=vocab_size,
         n_layer=depth, n_head=num_heads, n_kv_head=num_heads, n_embd=model_dim,
-        window_pattern=WINDOW_PATTERN,
+        window_pattern=WINDOW_PATTERN, dropout=DROPOUT,
     )
 
 config = build_model_config(DEPTH)
@@ -612,12 +576,20 @@ model.eval()
 with autocast_ctx:
     val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE)
 
+# OOD evaluation (WikiText-2)
+from eval_perplexity import load_dataset_text, evaluate as eval_ood
+ood_text = load_dataset_text("wikitext-2")
+with autocast_ctx:
+    ood_result = eval_ood(model, tokenizer, ood_text, device=str(device))
+ood_bpb = ood_result["bpb"]
+print(f"OOD eval (WikiText-2): BPB = {ood_bpb:.6f}")
+
 # Save checkpoint and tokenizer with val_bpb in path
 import shutil
 ckpt_dir = os.environ.get("CKPT_DIR", os.path.join(os.path.expanduser("~"), ".cache", "autoresearch",
                                                    "checkpoints"))
 os.makedirs(ckpt_dir, exist_ok=True)
-ckpt_path = os.path.join(ckpt_dir, f"model_bpb_{val_bpb:.6f}.pt")
+ckpt_path = os.path.join(ckpt_dir, f"model_bpb_{val_bpb:.6f}_ood_{ood_bpb:.6f}.pt")
 torch.save({"model": model.state_dict(), "config": asdict(config)}, ckpt_path)
 tokenizer_src = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch", "tokenizer", "tokenizer.pkl")
 tokenizer_dst = os.path.join(ckpt_dir, "tokenizer.pkl")
@@ -630,8 +602,12 @@ startup_time = t_start_training - t_start
 steady_state_mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE * (step - 10) / total_training_time / H100_BF16_PEAK_FLOPS if total_training_time > 0 else 0
 peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
 
+fitness = 0.5 * val_bpb + 0.5 * ood_bpb
+
 print("---")
+print(f"fitness:          {fitness:.6f}")
 print(f"val_bpb:          {val_bpb:.6f}")
+print(f"ood_bpb:          {ood_bpb:.6f}")
 print(f"training_seconds: {total_training_time:.1f}")
 print(f"total_seconds:    {t_end - t_start:.1f}")
 print(f"peak_vram_mb:     {peak_vram_mb:.1f}")
