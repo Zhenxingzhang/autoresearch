@@ -24,3 +24,4 @@ results.tsv
 .python-version
 .idea
 checkpoints
+bolt.yaml
