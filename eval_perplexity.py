@@ -35,8 +35,8 @@ from model import GPTConfig, GPT, Tokenizer
 # ---------------------------------------------------------------------------
 
 DATASETS = {
-    "wikitext-103": ("wikitext", "wikitext-103-raw-v1", "test"),
-    "wikitext-2": ("wikitext", "wikitext-2-raw-v1", "test"),
+    "wikitext-103": ("Salesforce/wikitext", "wikitext-103-raw-v1", "test"),
+    "wikitext-2": ("Salesforce/wikitext", "wikitext-2-raw-v1", "test"),
     "lambada": ("EleutherAI/lambada_openai", "default", "test"),
     "ptb": ("ptb_text_only", "penn_treebank", "test"),
 }
@@ -51,7 +51,7 @@ def load_dataset_text(name: str) -> str:
 
     path, subset, split = DATASETS[name]
     print(f"Loading {name} ({path}/{subset}, split={split}) ...")
-    ds = load_dataset(path, subset, split=split, trust_remote_code=True)
+    ds = load_dataset(path, subset, split=split)
 
     # Concatenate all text fields
     if "text" in ds.column_names:
@@ -223,7 +223,7 @@ def main():
             state_dict = {k.removeprefix("_orig_mod."): v for k, v in state_dict.items()}
         model.load_state_dict(state_dict)
 
-    model = model.to(device)
+    model = model.to(device).float()  # always eval in float32 for consistent results across devices
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Model: {config.n_layer}L / {config.n_head}H / {config.n_embd}D — {num_params / 1e6:.1f}M params")
     print(f"Context window: {config.sequence_len} tokens")

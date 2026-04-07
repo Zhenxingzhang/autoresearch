@@ -122,7 +122,7 @@ class CausalSelfAttention(nn.Module):
             else None
         )
 
-    def forward(self, x, ve, cos_sin):
+    def forward(self, x, ve, cos_sin, window_size=None):
         B, T, C = x.size()
         q = self.c_q(x).view(B, T, self.n_head, self.head_dim)
         k = self.c_k(x).view(B, T, self.n_kv_head, self.head_dim)
@@ -139,7 +139,14 @@ class CausalSelfAttention(nn.Module):
             reps = self.n_head // self.n_kv_head
             k = k.repeat_interleave(reps, dim=1)
             v = v.repeat_interleave(reps, dim=1)
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        if window_size is not None and window_size < T:
+            # Sliding window: causal mask limited to window_size tokens
+            row = torch.arange(T, device=x.device).unsqueeze(1)
+            col = torch.arange(T, device=x.device).unsqueeze(0)
+            mask = (col <= row) & (col >= row - window_size + 1)
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        else:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         return self.c_proj(y)
 
@@ -163,8 +170,8 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp = MLP(config)
 
-    def forward(self, x, ve, cos_sin):
-        x = x + self.attn(norm(x), ve, cos_sin)
+    def forward(self, x, ve, cos_sin, window_size=None):
+        x = x + self.attn(norm(x), ve, cos_sin, window_size)
         x = x + self.mlp(norm(x))
         return x
 
@@ -189,6 +196,18 @@ class GPT(nn.Module):
         cos, sin = self._precompute_rotary_embeddings(config.sequence_len, head_dim)
         self.register_buffer("cos", cos, persistent=False)
         self.register_buffer("sin", sin, persistent=False)
+        self.window_sizes = self._compute_window_sizes(config)
+
+    def _compute_window_sizes(self, config):
+        pattern = config.window_pattern.upper()
+        long_window = config.sequence_len
+        short_window = long_window // 2
+        char_to_window = {"L": long_window, "S": short_window}
+        sizes = []
+        for i in range(config.n_layer):
+            sizes.append(char_to_window[pattern[i % len(pattern)]])
+        sizes[-1] = long_window  # last layer always full attention
+        return sizes
 
     def _precompute_rotary_embeddings(self, seq_len, head_dim, base=10000, device=None):
         if device is None:
@@ -215,6 +234,10 @@ class GPT(nn.Module):
         for i, block in enumerate(self.transformer.h):
             x = self.resid_lambdas[i] * x + self.x0_lambdas[i] * x0
             ve = self.value_embeds[str(i)](idx) if str(i) in self.value_embeds else None
-            x = block(x, ve, cos_sin)
+            x = block(x, ve, cos_sin, self.window_sizes[i])
         x = norm(x)
-        return self.lm_head(x)
+        logits = self.lm_head(x)
+        logits = logits.float()
+        softcap = 15
+        logits = softcap * torch.tanh(logits / softcap)
+        return logits
