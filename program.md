@@ -21,7 +21,7 @@ Once you get confirmation, kick off the experimentation.
 
 ## Experimentation
 
-Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: `uv run train.py`.
+Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 10 minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: `uv run train.py`.
 
 **What you CAN do:**
 - Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
@@ -31,7 +31,7 @@ Each experiment runs on a single GPU. The training script runs for a **fixed tim
 - Install new packages or add dependencies. You can only use what's already in `pyproject.toml`.
 - Modify the evaluation harness. The `evaluate_bpb` function in `prepare.py` is the ground truth metric.
 
-**The goal is simple: get the lowest fitness score.** Fitness is a composite metric: `fitness = 0.5 * val_bpb + 0.5 * ood_bpb` (where ood_bpb is WikiText-2 BPB). This prevents overfitting to the in-distribution validation set. Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size. The only constraint is that the code runs without crashing and finishes within the time budget.
+**The goal is simple: get the lowest fitness score.** Fitness is a composite metric: `fitness = 0.5 * val_bpb + 0.5 * ood_bpb` (where ood_bpb is WikiText-2 BPB). This prevents overfitting to the in-distribution validation set. Since the time budget is fixed, you don't need to worry about training time — it's always 10 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size. The only constraint is that the code runs without crashing and finishes within the time budget.
 
 **VRAM** is a soft constraint. Some increase is acceptable for meaningful val_bpb gains, but it should not blow up dramatically.
 
@@ -106,7 +106,7 @@ These are optional starting points drawn from recent ML research and the nanocha
 - Batch size interacts with LR — if you increase one, consider adjusting the other.
 
 **Model scaling:**
-- Try depth 6–12 and aspect ratios 48–96. Wider-but-shallower or deeper-but-narrower may trade off differently under a 5-minute budget.
+- Try depth 6–12 and aspect ratios 48–96. Wider-but-shallower or deeper-but-narrower may trade off differently under a 10-minute budget.
 - Smaller models train more steps in the same time budget, which can help if the model is currently undertrained.
 
 **Architecture ideas:**
@@ -120,7 +120,7 @@ These are optional starting points drawn from recent ML research and the nanocha
 
 **Things that probably won't help:**
 - Changing the tokenizer or vocab size (controlled by prepare.py, out of scope).
-- Dropout or regularization — the model is undertrained in 5 minutes, not overfitting.
+- Dropout or regularization — the model is undertrained in 10 minutes, not overfitting.
 
 ## Output format
 
@@ -131,7 +131,7 @@ Once the script finishes it prints a summary like this:
 fitness:          0.997900
 val_bpb:          0.985000
 ood_bpb:          1.010800
-training_seconds: 300.1
+training_seconds: 600.1
 total_seconds:    325.9
 peak_vram_mb:     45060.2
 mfu_percent:      39.80
@@ -141,7 +141,7 @@ num_params_M:     50.3
 depth:            8
 ```
 
-Note that the script is configured to always stop after 5 minutes, so depending on the computing platform of this computer the numbers might look different. You can extract the key metric from the log file:
+Note that the script is configured to always stop after 10 minutes, so depending on the computing platform of this computer the numbers might look different. You can extract the key metric from the log file:
 
 ```
 grep "^fitness:" run.log
@@ -180,23 +180,33 @@ The experiment runs on a dedicated branch (e.g. `autoresearch/mar5` or `autorese
 LOOP FOREVER:
 
 0. **Refresh certs**: Run `source refresh_claude_cert_path.sh` to refresh the cert files before each iteration.
-1. **Plan**: Re-read `scratchpad.md`. Based on your learnings and ideas queue, pick the next experiment. Briefly reason about why you expect it to help.
-2. Tune `train.py` with the experimental idea by directly hacking the code.
-3. git commit
-4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-5. Read out the results: `grep "^fitness:\|^val_bpb:\|^ood_bpb:\|^peak_vram_mb:" run.log`
-6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
-7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
-8. **Update scratchpad.md**: Record what you learned. Update the ideas queue. Move dead ends. Update "Current best" if applicable.
-9. If fitness improved (lower), you "advance" the branch, keeping the git commit
-10. If fitness is equal or worse, you git reset back to where you started
+1. **Deep research** (every ~10 iterations, or when stuck for 3+ experiments): Use web fetch to research the latest training tricks, model architecture designs, and optimization techniques for training small GPT-like LLMs on a single H100 GPU. Focus on:
+   - Recent papers and blog posts on efficient small-model pretraining (e.g., MobileLLM, SmolLM, LLM360, nanogpt-speedrun community)
+   - Architecture innovations for sub-100M models: attention variants, FFN designs, embedding tricks, parameter sharing
+   - Optimizer advances: Schedule-Free, SOAP, Adalayer, per-layer LR scaling
+   - Training stability tricks: logit softcapping, QK-norm, z-loss, warmup strategies
+   - Data efficiency: curriculum learning, sequence packing, batch size scheduling
+   - Hardware-aware optimizations: Flash Attention configs, mixed precision strategies, memory-compute tradeoffs on H100
+
+   Record findings in `scratchpad.md` under a "## Research notes" section with date stamps. Translate findings into concrete ideas and add them to the "Ideas queue" with expected impact (high/medium/low). This step ensures experiments are informed by SOTA rather than just trial-and-error.
+
+2. **Plan**: Re-read `scratchpad.md`. Based on your learnings, research notes, and ideas queue, pick the next experiment. Briefly reason about why you expect it to help.
+3. Tune `train.py` with the experimental idea by directly hacking the code.
+4. git commit
+5. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
+6. Read out the results: `grep "^fitness:\|^val_bpb:\|^ood_bpb:\|^peak_vram_mb:" run.log`
+7. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
+8. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
+9. **Update scratchpad.md**: Record what you learned. Update the ideas queue. Move dead ends. Update "Current best" if applicable.
+10. If fitness improved (lower), you "advance" the branch, keeping the git commit
+11. If fitness is equal or worse, you git reset back to where you started
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
 
-**Timeout**: Each experiment should take ~5 minutes total (+ a few seconds for startup and eval overhead). If a run exceeds 10 minutes, kill it and treat it as a failure (discard and revert).
+**Timeout**: Each experiment should take ~10 minutes total (+ a few seconds for startup and eval overhead). If a run exceeds 20 minutes, kill it and treat it as a failure (discard and revert).
 
 **Crashes**: If a run crashes (OOM, or a bug, or etc.), use your judgment: If it's something dumb and easy to fix (e.g. a typo, a missing import), fix it and re-run. If the idea itself is fundamentally broken, just skip it, log "crash" as the status in the tsv, and move on.
 
 **NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
 
-As an example use case, a user might leave you running while they sleep. If each experiment takes you ~5 minutes then you can run approx 12/hour, for a total of about 100 over the duration of the average human sleep. The user then wakes up to experimental results, all completed by you while they slept!
+As an example use case, a user might leave you running while they sleep. If each experiment takes you ~10 minutes then you can run approx 6/hour, for a total of about 50 over the duration of the average human sleep. The user then wakes up to experimental results, all completed by you while they slept!
