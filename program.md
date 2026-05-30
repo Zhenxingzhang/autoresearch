@@ -13,9 +13,10 @@ To set up a new experiment, work with the user to:
    - `prepare.py` — fixed constants, data prep, tokenizer, dataloader, evaluation. Do not modify.
    - `train.py` — the file you modify. Model architecture, optimizer, training loop.
 4. **Verify data exists**: Check that `~/.cache/autoresearch/` contains data shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
-5. **Initialize results.tsv**: Create `results.tsv` with just the header row. The baseline will be recorded after the first run.
-6. **Initialize scratchpad.md**: Create `scratchpad.md` with the template below. This is your persistent research notebook — do not commit it.
-7. **Confirm and go**: Confirm setup looks good.
+5. **Determine artifact paths**: Check if the `$BOLT_ARTIFACT_DIR` environment variable is set. If it is, write `results.tsv` and `scratchpad.md` to that directory (e.g. `$BOLT_ARTIFACT_DIR/results.tsv`). Otherwise write them to the repo root as usual.
+6. **Initialize results.tsv**: Create `results.tsv` (at the path determined above) with just the header row (`timestamp\tcommit\tfitness\tmemory_gb\tstatus\tdescription`). The baseline will be recorded after the first run.
+7. **Initialize scratchpad.md**: Create `scratchpad.md` (at the path determined above) with the template below. This is your persistent research notebook — do not commit it.
+8. **Confirm and go**: Confirm setup looks good.
 
 Once you get confirmation, kick off the experimentation.
 
@@ -151,26 +152,27 @@ grep "^fitness:" run.log
 
 When an experiment is done, log it to `results.tsv` (tab-separated, NOT comma-separated — commas break in descriptions).
 
-The TSV has a header row and 5 columns:
+The TSV has a header row and 6 columns:
 
 ```
-commit	fitness	memory_gb	status	description
+timestamp	commit	fitness	memory_gb	status	description
 ```
 
-1. git commit hash (short, 7 chars)
-2. fitness score achieved (e.g. 1.234567) — use 0.000000 for crashes
-3. peak memory in GB, round to .1f (e.g. 12.3 — divide peak_vram_mb by 1024) — use 0.0 for crashes
-4. status: `keep`, `discard`, or `crash`
-5. short text description of what this experiment tried
+1. timestamp of when the run completed (ISO 8601, e.g. `2026-04-08T14:32:01`)
+2. git commit hash (short, 7 chars)
+3. fitness score achieved (e.g. 1.234567) — use 0.000000 for crashes
+4. peak memory in GB, round to .1f (e.g. 12.3 — divide peak_vram_mb by 1024) — use 0.0 for crashes
+5. status: `keep`, `discard`, or `crash`
+6. short text description of what this experiment tried
 
 Example:
 
 ```
-commit	fitness	memory_gb	status	description
-a1b2c3d	0.997900	44.0	keep	baseline
-b2c3d4e	0.993200	44.2	keep	increase LR to 0.04
-c3d4e5f	1.005000	44.0	discard	switch to GeLU activation
-d4e5f6g	0.000000	0.0	crash	double model width (OOM)
+timestamp	commit	fitness	memory_gb	status	description
+2026-04-08T14:32:01	a1b2c3d	0.997900	44.0	keep	baseline
+2026-04-08T14:43:15	b2c3d4e	0.993200	44.2	keep	increase LR to 0.04
+2026-04-08T14:54:22	c3d4e5f	1.005000	44.0	discard	switch to GeLU activation
+2026-04-08T15:05:09	d4e5f6g	0.000000	0.0	crash	double model width (OOM)
 ```
 
 ## The experiment loop
