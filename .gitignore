@@ -25,3 +25,4 @@ results.tsv
 .idea
 checkpoints
 bolt.yaml
+.DS_Store
