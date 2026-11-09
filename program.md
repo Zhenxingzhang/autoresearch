@@ -11,7 +11,8 @@ To set up a new experiment, work with the user to:
 3. **Read the in-scope files**: The repo is small. Read these files for full context:
    - `README.md` — repository context.
    - `prepare.py` — fixed constants, data prep, tokenizer, dataloader, evaluation. Do not modify.
-   - `train.py` — the file you modify. Model architecture, optimizer, training loop.
+   - `model.py` — the model architecture (`GPTConfig`, attention, MLP, `GPT`). You modify this for architecture changes. It is the single source of truth: `generate.py` and `eval_perplexity.py` import the same classes, so checkpoints always match.
+   - `train.py` — the file you modify for everything else: hyperparameters, optimizer, schedules, training loop.
 4. **Verify data exists**: Check that `~/.cache/autoresearch/` contains data shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
 5. **Determine artifact paths**: Check if the `$BOLT_ARTIFACT_DIR` environment variable is set. If it is, write `results.tsv` and `scratchpad.md` to that directory (e.g. `$BOLT_ARTIFACT_DIR/results.tsv`). Otherwise write them to the repo root as usual.
 6. **Initialize results.tsv**: Create `results.tsv` (at the path determined above) with just the header row (`timestamp\tcommit\tfitness\tmemory_gb\tstatus\tdescription`). The baseline will be recorded after the first run.
@@ -25,7 +26,8 @@ Once you get confirmation, kick off the experimentation.
 Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 10 minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: `uv run train.py`.
 
 **What you CAN do:**
-- Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
+- Modify `train.py` and `model.py` — these are the only files you edit. Everything is fair game: model architecture (in `model.py`), optimizer, hyperparameters, training loop, batch size, model size, etc. (in `train.py`).
+- Keep `model.py`'s interface stable, because `generate.py` and `eval_perplexity.py` depend on it: `GPT(config)` must still build from a `GPTConfig`, `config.sequence_len` must exist, and `model(idx)` must return logits of shape `(B, T, vocab)` (and `model(idx, targets)` the loss). Don't touch the `Tokenizer` class. Attention must keep working on CPU (the SDPA fallback), not only with FlashAttention-3.
 
 **What you CANNOT do:**
 - Modify `prepare.py`. It is read-only. It contains the fixed evaluation, data loading, tokenizer, and training constants (time budget, sequence length, etc).

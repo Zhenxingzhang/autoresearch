@@ -16,7 +16,8 @@ The idea: give an AI agent a small but real LLM training setup and let it experi
 The repo is deliberately kept small and only really has three files that matter:
 
 - **`prepare.py`** — fixed constants, one-time data prep (downloads training data, trains a BPE tokenizer), and runtime utilities (dataloader, evaluation). Not modified.
-- **`train.py`** — the single file the agent edits. Contains the full GPT model, optimizer (Muon + AdamW), and training loop. Everything is fair game: architecture, hyperparameters, optimizer, batch size, etc. **This file is edited and iterated on by the agent**.
+- **`model.py`** — the GPT architecture, config and tokenizer wrapper, shared by training, generation and evaluation (FlashAttention-3 on CUDA, SDPA fallback elsewhere). **Edited by the agent for architecture changes**.
+- **`train.py`** — optimizer (Muon + AdamW), schedules, and training loop. Everything is fair game: hyperparameters, optimizer, batch size, etc. **Edited and iterated on by the agent**.
 - **`program.md`** — baseline instructions for one agent. Point your agent here and let it go. **This file is edited and iterated on by the human**.
 
 By design, training runs for a **fixed 10-minute time budget** (wall clock, excluding startup/compilation), regardless of the details of your compute. The metric is **val_bpb** (validation bits per byte) — lower is better, and vocab-size-independent so architectural changes are fairly compared.
@@ -58,14 +59,15 @@ The `program.md` file is essentially a super lightweight "skill".
 
 ```
 prepare.py      — constants, data prep + runtime utilities (do not modify)
-train.py        — model, optimizer, training loop (agent modifies this)
+model.py        — model architecture + tokenizer (agent modifies this)
+train.py        — optimizer, training loop (agent modifies this)
 program.md      — agent instructions
 pyproject.toml  — dependencies
 ```
 
 ## Design choices
 
-- **Single file to modify.** The agent only touches `train.py`. This keeps the scope manageable and diffs reviewable.
+- **Two files to modify.** The agent touches `model.py` (architecture) and `train.py` (optimizer and training). Keeping the model in one importable file means generation and evaluation can never drift from what was trained.
 - **Fixed time budget.** Training always runs for exactly 10 minutes, regardless of your specific platform. This means you can expect approx 6 experiments/hour and approx 50 experiments while you sleep. There are two upsides of this design decision. First, this makes experiments directly comparable regardless of what the agent changes (model size, batch size, architecture, etc). Second, this means that autoresearch will find the most optimal model for your platform in that time budget. The downside is that your runs (and results) become not comparable to other people running on other compute platforms.
 - **Self-contained.** No external dependencies beyond PyTorch and a few small packages. No distributed training, no complex configs. One GPU, one file, one metric.
 
